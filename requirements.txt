@@ -1,4 +1,0 @@
-Flask
-PyMuPDF
-python-magic
-gunicorn

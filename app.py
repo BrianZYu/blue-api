@@ -1,46 +1,36 @@
-from flask import Flask, request, jsonify
-import fitz  # PyMuPDF
 import os
-import uuid
+from mistralai import Mistral
 
-app = Flask(__name__)
-UPLOAD_FOLDER = "uploads"
-IMAGE_FOLDER = "images"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(IMAGE_FOLDER, exist_ok=True)
+api_key = os.environ["MISTRAL_API_KEY"]
+client = Mistral(api_key=api_key)
+ocr_model = "mistral-ocr-latest"
 
-@app.route('/extract-images', methods=['POST'])
-def extract_images():
-    if 'pdf' not in request.files:
-        return jsonify({"error": "No PDF file part in the request"}), 400
-
-    file = request.files['pdf']
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    pdf_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}.pdf")
-    file.save(pdf_path)
-
-    image_paths = []
-    doc = fitz.open(pdf_path)
-    for page_index in range(len(doc)):
-        for img_index, img in enumerate(doc.get_page_images(page_index)):
-            xref = img[0]
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]
-            image_filename = f"{uuid.uuid4()}.{image_ext}"
-            image_path = os.path.join(IMAGE_FOLDER, image_filename)
-
-            with open(image_path, "wb") as img_file:
-                img_file.write(image_bytes)
-                image_paths.append(image_filename)
-
-    doc.close()
-    os.remove(pdf_path)
-
-    return jsonify({"extracted_images": image_paths})
+def _perform_ocr(url: str) -> str:
+    try:   # Apply OCR to the PDF URL
+        response = client.ocr.process(
+            model=ocr_model,
+            document={
+                "type": "document_url",
+                "document_url": url
+                }
+            )
+    except Exception:
+        try:  # IF PDF OCR fails, try Image OCR
+            response = client.ocr.process(
+                model=ocr_model,
+                document={
+                    "type": "image_url",
+                    "image_url": url
+                    }
+                )
+        except Exception as e:
+            return e  # Return the error to the model if it fails, otherwise return the contents
+    return "\n\n".join([f"### Page {i+1}\n{response.pages[i].markdown}" for i in range(len(response.pages))])
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+def main():
+    url = input("Enter url:")
+    print(_perform_ocr(url))   
+
+if __name__ == "__main__":
+    main()
